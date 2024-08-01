@@ -116,7 +116,7 @@ namespace Research_Arcade_Updater
                 while (true)
                 {
                     // Wait 1 hour before checking for updates again
-                    await Task.Delay(10 * 1000);
+                    await Task.Delay(60 * 60 * 1000);
                     CheckForUpdates();
                 }
             });
