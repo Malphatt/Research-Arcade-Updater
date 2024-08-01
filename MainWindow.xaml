@@ -12,13 +12,13 @@
         ContentRendered="Window_ContentRendered"
         Title="Updater" Height="450" Width="800">
     <Window.Resources>
-        <System:String x:Key="UpdaterVersion">[v1.0.1-24 Updater Release Build]</System:String>
+        <System:String x:Key="UpdaterVersion">[v1.0.2-24 Updater Release Build]</System:String>
         <Style x:Key="Early GameBoy">
             <Setter Property="TextElement.FontFamily" Value="/Fonts/#Press Start 2P"/>
         </Style>
     </Window.Resources>
     <Grid Background="Black">
-        <TextBlock x:Name="StatusText" Text="Waiting for an internet connection..." Foreground="White" FontSize="18" Style="{StaticResource Early GameBoy}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <TextBlock x:Name="StatusText" Text="Awaiting Instructions..." Foreground="White" FontSize="18" Style="{StaticResource Early GameBoy}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
         <TextBlock Text="{StaticResource UpdaterVersion}" Foreground="#777" FontSize="8" Style="{StaticResource Early GameBoy}" Margin="10" HorizontalAlignment="Left" VerticalAlignment="Bottom"/>
     </Grid>
 </Window>

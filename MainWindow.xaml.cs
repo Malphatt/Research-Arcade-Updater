@@ -18,6 +18,7 @@ namespace Research_Arcade_Updater
         idle,
         startingLauncher,
         closingLauncher,
+        restartingLauncher,
         failed,
         checkingForUpdates,
         updatingLauncher,
@@ -63,6 +64,9 @@ namespace Research_Arcade_Updater
                                     break;
                                 case LauncherState.closingLauncher:
                                     StatusText.Text = "Closing Launcher...";
+                                    break;
+                                case LauncherState.restartingLauncher:
+                                    StatusText.Text = "Restarting Launcher...";
                                     break;
                                 case LauncherState.failed:
                                     StatusText.Text = "Failed (Please contact IT for support)";
@@ -122,6 +126,25 @@ namespace Research_Arcade_Updater
             });
         }
 
+        private void Window_Closing(object sender, CancelEventArgs e)
+        {
+            // Close the launcher
+            CloseLauncher();
+        }
+
+        private void Launcher_Closing(object sender, CancelEventArgs e)
+        {
+            launcherProcess = null;
+            State = LauncherState.restartingLauncher;
+
+            // After 3 seconds start the launcher
+            Task.Run(async () =>
+            {
+                await Task.Delay(5000);
+                StartLauncher();
+            });
+        }
+
         private void StartLauncher()
         {
             if (launcherProcess == null)
@@ -130,15 +153,18 @@ namespace Research_Arcade_Updater
 
                 launcherProcess = Process.Start(Path.Combine(launcherPath, "Research-Arcade-Launcher.exe"));
 
+                // Check if the launcher process has quit
+                Task.Run(async () =>
+                {
+                    while (!launcherProcess.HasExited)
+                        await Task.Delay(1000);
+
+                    Launcher_Closing(null, null);
+                });
+
                 // Bring the launcher to the front
                 SetForegroundWindow(launcherProcess.MainWindowHandle);
             }
-        }
-
-        private void Window_Closing(object sender, CancelEventArgs e)
-        {
-            // Close the launcher
-            CloseLauncher();
         }
 
         private void CloseLauncher()
