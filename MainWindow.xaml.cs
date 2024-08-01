@@ -4,6 +4,10 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.Net;
+using ICSharpCode.SharpZipLib.Zip;
+using Newtonsoft.Json.Linq;
+using System.ComponentModel;
 
 namespace Research_Arcade_Updater
 {
@@ -11,6 +15,7 @@ namespace Research_Arcade_Updater
 
     enum LauncherState
     {
+        idle,
         startingLauncher,
         closingLauncher,
         failed,
@@ -21,12 +26,18 @@ namespace Research_Arcade_Updater
 
     public partial class MainWindow : Window
     {
+        // Send a key press
+        [DllImport("User32.dll")]
+        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+
         [DllImport("User32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
 
         private readonly string rootPath;
         private readonly string configPath;
         private readonly string launcherPath;
+
+        private JObject config;
 
         private Process launcherProcess = null;
 
@@ -36,34 +47,48 @@ namespace Research_Arcade_Updater
             get => _state;
             set
             {
-                if (_state == value) return;
-                _state = value;
+                if (Application.Current != null && Application.Current.Dispatcher != null)
+                    try {
+                        Application.Current.Dispatcher.Invoke(() => {
+                            if (_state == value) return;
+                            _state = value;
 
-                switch (_state)
-                {
-                    case LauncherState.startingLauncher:
-                        StatusText.Text = "Starting Launcher...";
-                        break;
-                    case LauncherState.closingLauncher:
-                        StatusText.Text = "Closing Launcher...";
-                        break;
-                    case LauncherState.failed:
-                        StatusText.Text = "Failed (Please contact IT for support)";
-                        break;
-                    case LauncherState.checkingForUpdates:
-                        StatusText.Text = "Checking for updates...";
-                        break;
-                    case LauncherState.waitingOnInternet:
-                        StatusText.Text = "Waiting for an internet connection...";
-                        break;
-                    default:
-                        break;
-                }
+                            switch (_state)
+                            {
+                                case LauncherState.idle:
+                                    StatusText.Text = "Awaiting Instructions...";
+                                    break;
+                                case LauncherState.startingLauncher:
+                                    StatusText.Text = "Starting Launcher...";
+                                    break;
+                                case LauncherState.closingLauncher:
+                                    StatusText.Text = "Closing Launcher...";
+                                    break;
+                                case LauncherState.failed:
+                                    StatusText.Text = "Failed (Please contact IT for support)";
+                                    break;
+                                case LauncherState.checkingForUpdates:
+                                    StatusText.Text = "Checking for updates...";
+                                    break;
+                                case LauncherState.updatingLauncher:
+                                    StatusText.Text = "Updating Launcher...";
+                                    break;
+                                case LauncherState.waitingOnInternet:
+                                    StatusText.Text = "Waiting for an internet connection...";
+                                    break;
+                                default:
+                                    break;
+                            }
+
+                        });
+                    } catch (TaskCanceledException) { }
             }
         }
 
         public MainWindow()
         {
+            Closing += Window_Closing;
+
             InitializeComponent();
 
             // Setup Directories
@@ -75,13 +100,6 @@ namespace Research_Arcade_Updater
             // Create the Launcher directory if it does not exist
             if (!Directory.Exists(launcherPath))
                 Directory.CreateDirectory(launcherPath);
-
-            // Check for an internet connection
-            if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
-            {
-                State = LauncherState.waitingOnInternet;
-                return;
-            }
         }
 
         private void Window_ContentRendered(object sender, EventArgs e)
@@ -94,46 +112,143 @@ namespace Research_Arcade_Updater
             Task.Run(async () =>
             {
                 CheckForUpdates();
+
                 while (true)
                 {
                     // Wait 1 hour before checking for updates again
-                    await Task.Delay(60 * 60 * 1000);
+                    await Task.Delay(10 * 1000);
                     CheckForUpdates();
                 }
             });
         }
 
-        private void CheckForUpdates()
+        private void StartLauncher()
         {
-            // Check for updates
-            State = LauncherState.checkingForUpdates;
-
-            // Get the current version of the launcher
-            Version currentVersion = new Version("0.0.0");
-
-            // Get the latest version of the launcher
-            Version latestVersion = new Version("0.0.0");
-
-            // Check if the launcher is up to date
-            if (currentVersion.IsDifferentVersion(latestVersion))
+            if (launcherProcess == null)
             {
-                // Close the launcher
-                if (launcherProcess != null)
-                {
-                    State = LauncherState.closingLauncher;
-                    launcherProcess.Kill();
-                    launcherProcess.WaitForExit();
+                State = LauncherState.startingLauncher;
 
-                    launcherProcess = null;
-                }
+                launcherProcess = Process.Start(Path.Combine(launcherPath, "Research-Arcade-Launcher.exe"));
 
-                // Update the launcher
-                State = LauncherState.updatingLauncher;
-                UpdateLauncher();
+                // Bring the launcher to the front
+                SetForegroundWindow(launcherProcess.MainWindowHandle);
             }
         }
 
+        private void Window_Closing(object sender, CancelEventArgs e)
+        {
+            // Close the launcher
+            CloseLauncher();
+        }
 
+        private void CloseLauncher()
+        {
+            if (launcherProcess != null)
+            {
+                State = LauncherState.closingLauncher;
+
+                // Send the close key to the launcher
+                keybd_event(69, 0, 0, 0);
+
+                // Wait for the launcher to close
+                launcherProcess.WaitForExit();
+                launcherProcess = null;
+
+                // Release the close key
+                keybd_event(69, 0, 2, 0);
+            }
+        }
+
+        private void CheckForUpdates()
+        {
+            State = LauncherState.checkingForUpdates;
+
+            try
+            {
+                // Get the online version of the launcher
+                WebClient webClient = new WebClient();
+                
+                // Load the config file
+                if (!File.Exists(configPath))
+                {
+                    State = LauncherState.failed;
+                    MessageBox.Show("Config file not found");
+                    return;
+                }
+
+                config = JObject.Parse(File.ReadAllText(configPath));
+
+                // Create the version file if it does not exist
+                if (!File.Exists(Path.Combine(rootPath, config["VersionPath"].ToString())))
+                    File.WriteAllText(Path.Combine(rootPath, config["VersionPath"].ToString()), "0.0.0");
+
+                // Get the current version of the launcher
+                Version currentVersion = new Version(File.ReadAllText(Path.Combine(rootPath, config["VersionPath"].ToString())));
+
+                // Get the latest version of the launcher
+                Version latestVersion = new Version(webClient.DownloadString(config["VersionURL"].ToString()));
+
+                // Check if the launcher is up to date
+                if (currentVersion.IsDifferentVersion(latestVersion))
+                {
+                    // Close the launcher
+                    CloseLauncher();
+
+                    // Update the launcher
+                    UpdateLauncher();
+
+                    // Update the version file
+                    File.WriteAllText(Path.Combine(rootPath, config["VersionPath"].ToString()), latestVersion.ToString());
+
+                    // Start the launcher
+                    StartLauncher();
+
+                    // After 3 seconds set the state to idle
+                    Task.Run(async () =>
+                    {
+                        await Task.Delay(3000);
+                        State = LauncherState.idle;
+                    });
+                }
+                else
+                {
+                    // Start the launcher
+                    StartLauncher();
+
+                    // After 3 seconds set the state to idle
+                    Task.Run(async () =>
+                    {
+                        await Task.Delay(3000);
+                        State = LauncherState.idle;
+                    });
+                }
+            } catch (Exception e)
+            {
+                State = LauncherState.failed;
+                MessageBox.Show(e.Message);
+            }
+        }
+
+        private void UpdateLauncher()
+        {
+            State = LauncherState.updatingLauncher;
+
+            // Delete the old launcher files (except the Games folder)
+            foreach (string file in Directory.GetFiles(launcherPath))
+                if (Path.GetFileName(file) != "Games")
+                    File.Delete(file);
+
+            // Download the launcher
+            WebClient webClient = new WebClient();
+            webClient.DownloadFile(config["LauncherURL"].ToString(), Path.Combine(launcherPath, "Launcher.zip"));
+
+            // Extract the launcher
+            FastZip fastZip = new FastZip();
+            fastZip.ExtractZip(Path.Combine(launcherPath, "Launcher.zip"), launcherPath, null);
+
+            // Delete the zip file
+            File.Delete(Path.Combine(launcherPath, "Launcher.zip"));
+        }
     }
 
     struct Version
