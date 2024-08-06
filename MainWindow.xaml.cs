@@ -98,7 +98,7 @@ namespace Research_Arcade_Updater
             // Setup Directories
             rootPath = Directory.GetCurrentDirectory();
 
-            configPath = Path.Combine(rootPath, "config.json");
+            configPath = Path.Combine(rootPath, "Config.json");
             launcherPath = Path.Combine(rootPath, "Launcher");
 
             // Create the Launcher directory if it does not exist
@@ -108,6 +108,11 @@ namespace Research_Arcade_Updater
 
         private void Window_ContentRendered(object sender, EventArgs e)
         {
+            // Find the Updater process and close it
+            Process[] processes = Process.GetProcessesByName("Research-Arcade-Launcher");
+            foreach (Process process in processes)
+                process.Kill();
+
             // Check for an internet connection
             while (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
                 State = LauncherState.waitingOnInternet;
@@ -205,14 +210,14 @@ namespace Research_Arcade_Updater
                 config = JObject.Parse(File.ReadAllText(configPath));
 
                 // Create the version file if it does not exist
-                if (!File.Exists(Path.Combine(rootPath, config["VersionPath"].ToString())))
-                    File.WriteAllText(Path.Combine(rootPath, config["VersionPath"].ToString()), "0.0.0");
+                if (!File.Exists(Path.Combine(rootPath, "Launcher/Launcher_Version.txt")))
+                    File.WriteAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt"), "0.0.0");
 
                 // Get the current version of the launcher
-                Version currentVersion = new Version(File.ReadAllText(Path.Combine(rootPath, config["VersionPath"].ToString())));
+                Version currentVersion = new Version(File.ReadAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt")));
 
                 // Get the latest version of the launcher
-                Version latestVersion = new Version(webClient.DownloadString(config["VersionURL"].ToString()));
+                Version latestVersion = new Version(webClient.DownloadString(config["LauncherVersionURL"].ToString()));
 
                 // Check if the launcher is up to date
                 if (currentVersion.IsDifferentVersion(latestVersion))
@@ -224,7 +229,7 @@ namespace Research_Arcade_Updater
                     UpdateLauncher();
 
                     // Update the version file
-                    File.WriteAllText(Path.Combine(rootPath, config["VersionPath"].ToString()), latestVersion.ToString());
+                    File.WriteAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt"), latestVersion.ToString());
 
                     // Start the launcher
                     StartLauncher();
