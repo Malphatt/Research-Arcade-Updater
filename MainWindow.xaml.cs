@@ -27,6 +27,8 @@ namespace Research_Arcade_Updater
 
     public partial class MainWindow : Window
     {
+        bool failed = false;
+
         // Send a key press
         [DllImport("User32.dll")]
         public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
@@ -142,11 +144,10 @@ namespace Research_Arcade_Updater
             launcherProcess = null;
             State = LauncherState.restartingLauncher;
 
-            // After 3 seconds start the launcher
-            Task.Run(async () =>
-            {
+            // After 5 seconds start the launcher
+            Task.Run(async () => {
                 await Task.Delay(5000);
-                StartLauncher();
+                CheckForUpdates();
             });
         }
 
@@ -158,10 +159,13 @@ namespace Research_Arcade_Updater
 
                 launcherProcess = Process.Start(Path.Combine(launcherPath, "Research-Arcade-Launcher.exe"));
 
+                if (failed)
+                    Task.Delay(1000).ContinueWith((_) => State = LauncherState.failed);
+
                 // Check if the launcher process has quit
                 Task.Run(async () =>
                 {
-                    while (!launcherProcess.HasExited)
+                    while (launcherProcess != null && !launcherProcess.HasExited)
                         await Task.Delay(1000);
 
                     Launcher_Closing(null, null);
@@ -182,7 +186,7 @@ namespace Research_Arcade_Updater
                 keybd_event(69, 0, 0, 0);
 
                 // Wait for the launcher to close
-                launcherProcess.WaitForExit();
+                launcherProcess?.WaitForExit();
                 launcherProcess = null;
 
                 // Release the close key
@@ -253,10 +257,15 @@ namespace Research_Arcade_Updater
                         State = LauncherState.idle;
                     });
                 }
-            } catch (Exception e)
+            }
+            catch (Exception)
             {
                 State = LauncherState.failed;
-                MessageBox.Show(e.Message);
+                failed = true;
+
+                // If the application isn't open, open it after 5 seconds
+                if (launcherProcess == null)
+                    StartLauncher();
             }
         }
 
