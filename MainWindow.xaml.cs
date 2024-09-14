@@ -221,7 +221,7 @@ namespace Research_Arcade_Updater
                 Version currentVersion = new Version(File.ReadAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt")));
 
                 // Get the latest version of the launcher
-                Version latestVersion = new Version(webClient.DownloadString(config["LauncherVersionURL"].ToString()));
+                Version latestVersion = new Version(webClient.DownloadString(EncodeOneDriveLink(config["LauncherVersionURL"].ToString())));
 
                 // Check if the launcher is up to date
                 if (currentVersion.IsDifferentVersion(latestVersion))
@@ -280,7 +280,7 @@ namespace Research_Arcade_Updater
 
             // Download the launcher
             WebClient webClient = new WebClient();
-            webClient.DownloadFile(config["LauncherURL"].ToString(), Path.Combine(launcherPath, "Launcher.zip"));
+            webClient.DownloadFile(EncodeOneDriveLink(config["LauncherURL"].ToString()), Path.Combine(launcherPath, "Launcher.zip"));
 
             // Extract the launcher
             FastZip fastZip = new FastZip();
@@ -288,6 +288,15 @@ namespace Research_Arcade_Updater
 
             // Delete the zip file
             File.Delete(Path.Combine(launcherPath, "Launcher.zip"));
+        }
+
+        private string EncodeOneDriveLink(string _link)
+        {
+            // Encode the OneDrive link
+            string base64Value = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(_link));
+            string encodedUrl = "u!" + base64Value.TrimEnd('=').Replace('/', '_').Replace('+', '-');
+
+            return "https://api.onedrive.com/v1.0/shares/" + encodedUrl + "/root/content";
         }
     }
 
