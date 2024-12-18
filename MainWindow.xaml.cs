@@ -115,9 +115,21 @@ namespace Research_Arcade_Updater
             foreach (Process process in processes)
                 process.Kill();
 
+            // Store the start time
+            DateTime startTime = DateTime.Now;
+
             // Check for an internet connection
             while (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+            {
                 State = LauncherState.waitingOnInternet;
+
+                // If the application has been waiting for 60 seconds, open the launcher without checking for updates
+                if ((DateTime.Now - startTime).TotalSeconds > 60)
+                {
+                    StartLauncher();
+                    return;
+                }
+            }
 
             // Initialize the update timer
             Task.Run(async () =>
