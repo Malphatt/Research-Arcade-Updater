@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -51,7 +51,8 @@ namespace Research_Arcade_Updater
             set
             {
                 if (Application.Current != null && Application.Current.Dispatcher != null)
-                    try {
+                    try
+                    {
                         Application.Current.Dispatcher.Invoke(() => {
                             if (_state == value) return;
                             _state = value;
@@ -87,7 +88,8 @@ namespace Research_Arcade_Updater
                             }
 
                         });
-                    } catch (TaskCanceledException) { }
+                    }
+                    catch (TaskCanceledException) { }
             }
         }
 
@@ -214,7 +216,7 @@ namespace Research_Arcade_Updater
             {
                 // Get the online version of the launcher
                 WebClient webClient = new WebClient();
-                
+
                 // Load the config file
                 if (!File.Exists(configPath))
                 {
