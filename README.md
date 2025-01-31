@@ -11,4 +11,4 @@
   If you leave it this way, it will probably crash, I didn't test it because I'm a professional.
 ## Information
   This is the Updater for [Research-Arcade-Launcher](https://github.com/Malphatt/Research-Arcade-Launcher "GitHub.com").
-  Refer to the docs for help.
+  Refer to the [Docs](https://github.com/Malphatt/Arcademia-Dev-Guide/wiki) for help.
