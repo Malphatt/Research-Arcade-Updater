@@ -1,30 +1,21 @@
-﻿﻿using System;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Newtonsoft.Json.Linq;
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Windows;
+using System.Text;
 using System.Threading.Tasks;
-using System.Diagnostics;
-using System.Net;
-using ICSharpCode.SharpZipLib.Zip;
-using Newtonsoft.Json.Linq;
-using System.ComponentModel;
+using System.Windows;
+using System.Net.Http.Headers;
+using System.Threading;
+using Research_Arcade_Updater.Models;
+using Research_Arcade_Updater.Services;
 
 namespace Research_Arcade_Updater
 {
-    // Launcher State Enum
-
-    enum LauncherState
-    {
-        idle,
-        startingLauncher,
-        closingLauncher,
-        restartingLauncher,
-        failed,
-        checkingForUpdates,
-        updatingLauncher,
-        waitingOnInternet,
-    }
-
     public partial class MainWindow : Window
     {
         bool failed = false;
@@ -36,16 +27,16 @@ namespace Research_Arcade_Updater
         [DllImport("User32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
 
-        private readonly string rootPath;
-        private readonly string configPath;
-        private readonly string launcherPath;
+        private static IHost _host;
+        private readonly IUpdaterService _updater;
 
-        private JObject config;
+        private readonly string rootPath;
+        private readonly string launcherPath;
 
         private Process launcherProcess = null;
 
-        private LauncherState _state;
-        internal LauncherState State
+        private UpdaterState _state;
+        internal UpdaterState State
         {
             get => _state;
             set
@@ -59,28 +50,28 @@ namespace Research_Arcade_Updater
 
                             switch (_state)
                             {
-                                case LauncherState.idle:
+                                case UpdaterState.idle:
                                     StatusText.Text = "Awaiting Instructions...";
                                     break;
-                                case LauncherState.startingLauncher:
+                                case UpdaterState.startingLauncher:
                                     StatusText.Text = "Starting Launcher...";
                                     break;
-                                case LauncherState.closingLauncher:
+                                case UpdaterState.closingLauncher:
                                     StatusText.Text = "Closing Launcher...";
                                     break;
-                                case LauncherState.restartingLauncher:
+                                case UpdaterState.restartingLauncher:
                                     StatusText.Text = "Restarting Launcher...";
                                     break;
-                                case LauncherState.failed:
+                                case UpdaterState.failed:
                                     StatusText.Text = "Failed (Please contact IT for support)";
                                     break;
-                                case LauncherState.checkingForUpdates:
+                                case UpdaterState.checkingForUpdates:
                                     StatusText.Text = "Checking for updates...";
                                     break;
-                                case LauncherState.updatingLauncher:
+                                case UpdaterState.updatingLauncher:
                                     StatusText.Text = "Updating Launcher...";
                                     break;
-                                case LauncherState.waitingOnInternet:
+                                case UpdaterState.waitingOnInternet:
                                     StatusText.Text = "Waiting for an internet connection...";
                                     break;
                                 default:
@@ -102,17 +93,48 @@ namespace Research_Arcade_Updater
             // Setup Directories
             rootPath = Directory.GetCurrentDirectory();
 
-            configPath = Path.Combine(rootPath, "Config.json");
+            string configPath = Path.Combine(rootPath, "Config.json");
+
+            // Load the config file
+            if (!File.Exists(configPath))
+            {
+                State = UpdaterState.failed;
+                MessageBox.Show("Config file not found");
+                return;
+            }
+
+            JObject config = JObject.Parse(File.ReadAllText(configPath));
+
             launcherPath = Path.Combine(rootPath, "Launcher");
 
             // Create the Launcher directory if it does not exist
             if (!Directory.Exists(launcherPath))
                 Directory.CreateDirectory(launcherPath);
-        }
 
-        private void Window_ContentRendered(object sender, EventArgs e)
-        {
-            // Find the Updater process and close it
+            _host = Host.CreateDefaultBuilder()
+                .ConfigureServices((context, services) => {
+                    var host = config["ApiHost"]?.ToString() ?? "https://localhost:5001";
+                    var user = config["ApiUser"]?.ToString() ?? "Research-Arcade-User";
+                    var pass = config["ApiPass"]?.ToString() ?? "Research-Arcade-Password";
+
+                    var creds = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{pass}"));
+
+                    services
+                        .AddHttpClient<IApiClient, ApiClient>(client =>
+                        {
+                            client.BaseAddress = new Uri(host);
+                            client.DefaultRequestHeaders.Authorization =
+                                new AuthenticationHeaderValue("ArcadeMachine", creds);
+                        });
+
+                    services.AddSingleton<IUpdaterService, UpdaterService>();
+                })
+                .Build();
+
+            _updater = _host.Services.GetRequiredService<IUpdaterService>();
+            _updater.StateChanged += Updater_StateChanged;
+
+            // Find the Launcher process and close it
             Process[] processes = Process.GetProcessesByName("Research-Arcade-Launcher");
             foreach (Process process in processes)
                 process.Kill();
@@ -123,7 +145,7 @@ namespace Research_Arcade_Updater
             // Check for an internet connection
             while (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
             {
-                State = LauncherState.waitingOnInternet;
+                State = UpdaterState.waitingOnInternet;
 
                 // If the application has been waiting for 60 seconds, open the launcher without checking for updates
                 if ((DateTime.Now - startTime).TotalSeconds > 60)
@@ -136,32 +158,42 @@ namespace Research_Arcade_Updater
             // Initialize the update timer
             Task.Run(async () =>
             {
-                CheckForUpdates();
+                await CheckForUpdates();
 
                 while (true)
                 {
                     // Wait 1 hour before checking for updates again
                     await Task.Delay(60 * 60 * 1000);
-                    CheckForUpdates();
+                    await CheckForUpdates();
                 }
             });
         }
 
-        private void Window_Closing(object sender, CancelEventArgs e)
+        private void Updater_StateChanged(object sender, LauncherStateChangedEventArgs e) => Dispatcher.Invoke(() => State = e.NewState);
+
+        private async void Window_Closing(object sender, CancelEventArgs e)
         {
             // Close the launcher
             CloseLauncher();
+
+            // Dispose of the host
+            if (_host != null)
+            {
+                await _host.StopAsync();
+                _host.Dispose();
+            }
         }
 
         private void Launcher_Closing(object sender, CancelEventArgs e)
         {
             launcherProcess = null;
-            State = LauncherState.restartingLauncher;
+            State = UpdaterState.restartingLauncher;
 
             // After 5 seconds start the launcher
-            Task.Run(async () => {
+            Task.Run(async () =>
+            {
                 await Task.Delay(5000);
-                CheckForUpdates();
+                await CheckForUpdates();
             });
         }
 
@@ -169,12 +201,19 @@ namespace Research_Arcade_Updater
         {
             if (launcherProcess == null)
             {
-                State = LauncherState.startingLauncher;
+                State = UpdaterState.startingLauncher;
+
+                // Check if the file exists
+                if (!File.Exists(Path.Combine(launcherPath, "Research-Arcade-Launcher.exe")))
+                {
+                    _updater.ResetRemoteMachineLauncherVersionAsync(CancellationToken.None).ContinueWith((_) => CheckForUpdates());
+                    return;
+                }
 
                 launcherProcess = Process.Start(Path.Combine(launcherPath, "Research-Arcade-Launcher.exe"));
 
                 if (failed)
-                    Task.Delay(1000).ContinueWith((_) => State = LauncherState.failed);
+                    Task.Delay(1000).ContinueWith((_) => State = UpdaterState.failed);
 
                 // Check if the launcher process has quit
                 Task.Run(async () =>
@@ -194,7 +233,7 @@ namespace Research_Arcade_Updater
         {
             if (launcherProcess != null)
             {
-                State = LauncherState.closingLauncher;
+                State = UpdaterState.closingLauncher;
 
                 // Send the close key to the launcher
                 keybd_event(69, 0, 0, 0);
@@ -208,170 +247,30 @@ namespace Research_Arcade_Updater
             }
         }
 
-        private void CheckForUpdates()
+        private async Task CheckForUpdates()
         {
-            State = LauncherState.checkingForUpdates;
-
             try
             {
-                // Get the online version of the launcher
-                WebClient webClient = new WebClient();
+                await _updater.CheckAndUpdateAsync(CancellationToken.None);
 
-                // Load the config file
-                if (!File.Exists(configPath))
-                {
-                    State = LauncherState.failed;
-                    MessageBox.Show("Config file not found");
-                    return;
-                }
+                // Start the launcher
+                StartLauncher();
 
-                config = JObject.Parse(File.ReadAllText(configPath));
-
-                // Create the version file if it does not exist
-                if (!File.Exists(Path.Combine(rootPath, "Launcher/Launcher_Version.txt")))
-                    File.WriteAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt"), "0.0.0");
-
-                // Get the current version of the launcher
-                Version currentVersion = new Version(File.ReadAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt")));
-
-                // Get the latest version of the launcher
-                Version latestVersion = new Version(webClient.DownloadString(EncodeLink(config["LauncherVersionURL"].ToString())));
-
-                // Check if the launcher is up to date
-                if (currentVersion.IsDifferentVersion(latestVersion))
-                {
-                    // Close the launcher
-                    CloseLauncher();
-
-                    // Update the launcher
-                    UpdateLauncher();
-
-                    // Update the version file
-                    File.WriteAllText(Path.Combine(rootPath, "Launcher/Launcher_Version.txt"), latestVersion.ToString());
-
-                    // Start the launcher
-                    StartLauncher();
-
-                    // After 3 seconds set the state to idle
-                    Task.Run(async () =>
-                    {
-                        await Task.Delay(3000);
-                        State = LauncherState.idle;
-                    });
-                }
-                else
-                {
-                    // Start the launcher
-                    StartLauncher();
-
-                    // After 3 seconds set the state to idle
-                    Task.Run(async () =>
-                    {
-                        await Task.Delay(3000);
-                        State = LauncherState.idle;
-                    });
-                }
+                // After 3 seconds set the state to idle
+                await Task.Delay(3000);
+                State = UpdaterState.idle;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error checking for updates: {ex.Message}");
 
-                State = LauncherState.failed;
+                State = UpdaterState.failed;
                 failed = true;
 
                 // If the application isn't open, open it after 5 seconds
-                if (launcherProcess == null)
-                    StartLauncher();
+                await Task.Delay(5000);
+                StartLauncher();
             }
-        }
-
-        private void UpdateLauncher()
-        {
-            State = LauncherState.updatingLauncher;
-
-            // Delete the old launcher files (except the Games folder)
-            foreach (string file in Directory.GetFiles(launcherPath))
-                if (Path.GetFileName(file) != "Games")
-                    File.Delete(file);
-
-            // Download the launcher
-            WebClient webClient = new WebClient();
-            webClient.DownloadFile(EncodeLink(config["LauncherURL"].ToString()), Path.Combine(launcherPath, "Launcher.zip"));
-
-            // Extract the launcher
-            FastZip fastZip = new FastZip();
-            fastZip.ExtractZip(Path.Combine(launcherPath, "Launcher.zip"), launcherPath, null);
-
-            // Delete the zip file
-            File.Delete(Path.Combine(launcherPath, "Launcher.zip"));
-        }
-
-        private string EncodeLink(string _link)
-        {
-            // If the link is not a OneDrive link, return it as is
-            if (!_link.Contains("1drv.ms") && !_link.Contains("onedrive.live.com"))
-                return _link;
-
-            // Encode the OneDrive link
-            string base64Value = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(_link));
-            string encodedUrl = "u!" + base64Value.TrimEnd('=').Replace('/', '_').Replace('+', '-');
-
-            return "https://api.onedrive.com/v1.0/shares/" + encodedUrl + "/root/content";
-        }
-    }
-
-    struct Version
-    {
-        // Zero value for the Version struct
-        internal static Version zero = new Version(0, 0, 0);
-
-        public int major;
-        public int minor;
-        public int subMinor;
-
-        internal Version(short _major, short _minor, short _subMinor)
-        {
-            // Initialize the version number
-            major = _major;
-            minor = _minor;
-            subMinor = _subMinor;
-        }
-
-        internal Version(string version)
-        {
-            string[] parts = version.Split('.');
-
-            // Reset the version number if it is not in the correct format
-            if (parts.Length != 3)
-            {
-                major = 0;
-                minor = 0;
-                subMinor = 0;
-                return;
-            }
-
-            // Parse the version number
-            major = int.Parse(parts[0]);
-            minor = int.Parse(parts[1]);
-            subMinor = int.Parse(parts[2]);
-        }
-
-        internal bool IsDifferentVersion(Version _otherVersion)
-        {
-            // Compare each part of the version number
-            if (major != _otherVersion.major)
-                return true;
-            else if (minor != _otherVersion.minor)
-                return true;
-            else if (subMinor != _otherVersion.subMinor)
-                return true;
-            else return false;
-        }
-
-        public override string ToString()
-        {
-            // Return the version number as a string
-            return $"{major}.{minor}.{subMinor}";
         }
     }
 }
