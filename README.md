@@ -4,8 +4,14 @@
   Edit the Config.json file to your liking, the template file looks like this:
   ```
   {
-    "LauncherURL": "",
-    "LauncherVersionURL": ""
+    "ApiHost": "https://example.com",
+    "ApiUser": "ExampleUsername",
+    "ApiPass": "ExamplePassword",
+    "NoInputTimeout_ms": 120000,
+
+    "WS_Enabled": false,
+    "WS_IP": "127.0.0.1",
+    "WS_Port": "8080"
   }
   ```
   If you leave it this way, it will probably crash, I didn't test it because I'm a professional.
