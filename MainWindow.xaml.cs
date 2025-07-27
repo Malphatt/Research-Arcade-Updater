@@ -1,18 +1,19 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Newtonsoft.Json.Linq;
+using Research_Arcade_Updater.Models;
+using Research_Arcade_Updater.Services;
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http.Headers;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Net.Http.Headers;
-using System.Threading;
-using Research_Arcade_Updater.Models;
-using Research_Arcade_Updater.Services;
 
 namespace Research_Arcade_Updater
 {
@@ -143,7 +144,7 @@ namespace Research_Arcade_Updater
             DateTime startTime = DateTime.Now;
 
             // Check for an internet connection
-            while (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+            while (!CanPing("google.com"))
             {
                 State = UpdaterState.waitingOnInternet;
 
@@ -167,6 +168,20 @@ namespace Research_Arcade_Updater
                     await CheckForUpdates();
                 }
             });
+        }
+
+        static bool CanPing(string host)
+        {
+            try
+            {
+                using Ping ping = new();
+                PingReply reply = ping.Send(host, 1000);
+                return reply.Status == IPStatus.Success;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void Updater_StateChanged(object sender, LauncherStateChangedEventArgs e) => Dispatcher.Invoke(() => State = e.NewState);

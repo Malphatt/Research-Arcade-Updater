@@ -69,23 +69,23 @@ namespace Research_Arcade_Updater.Services
         public async Task CheckAndUpdateAsync(CancellationToken cancellationToken)
         {
             OnStateChanged(UpdaterState.checkingForUpdates);
+            _logger.LogInformation("Checking for updates...");
             try
             {
-                _logger.LogInformation("Checking for updates...");
-                var info = await _apiClient.GetLauncherInfoAsync(_logger);
+                Version latestVersion = new(await _apiClient.GetLatestLauncherVersionAsync(_logger));
 
                 OnStateChanged(UpdaterState.updatingLauncher);
 
-                await DownloadAndExtractAsync(info, cancellationToken);
+                await DownloadLauncherAndExtractAsync(latestVersion, cancellationToken);
 
                 try
                 {
-                    bool updateResult = await _apiClient.UpdateRemoteLauncherVersionAsync(info.VersionNumber, _logger);
+                    bool updateResult = await _apiClient.UpdateRemoteLauncherVersionAsync(latestVersion.ToString(), _logger);
 
                     if (updateResult)
-                        _logger.LogInformation("Successfully updated launcher version to {VersionNumber}.", info.VersionNumber);
+                        _logger.LogInformation("Successfully updated launcher version to {VersionNumber}.", latestVersion);
                     else
-                        _logger.LogWarning("Failed to update launcher version to {VersionNumber}.", info.VersionNumber);
+                        _logger.LogWarning("Failed to update launcher version to {VersionNumber}.", latestVersion);
                 }
                 catch (Exception)
                 {
@@ -98,25 +98,31 @@ namespace Research_Arcade_Updater.Services
             }
         }
 
-        private async Task DownloadAndExtractAsync(LauncherInfo info, CancellationToken cancellationToken)
+        private async Task DownloadLauncherAndExtractAsync(Version versionNumber, CancellationToken cancellationToken)
         {
             OnStateChanged(UpdaterState.updatingLauncher);
+
+            _logger.LogInformation(
+                "Downloading launcher version: {VersionNumber}",
+                versionNumber
+            );
 
             // Delete the old launcher files (except the Games folder)
             foreach (string file in Directory.GetFiles(_launcherDir))
                 if (Path.GetFileName(file) != "Games")
                     File.Delete(file);
 
-            // Download the launcher using HttpClient
-            using HttpClient httpClient = new();
-            var response = await httpClient.GetAsync(info.FileUrl, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            // Download the launcher zip file
+            await using var zipStream = await _apiClient.GetLauncherDownloadAsync(versionNumber.ToString(), cancellationToken);
+            var zipFilePath = Path.Combine(_launcherDir, $"{versionNumber}.zip");
 
-            var zipFilePath = Path.Combine(_launcherDir, "Launcher.zip");
             await using (var fileStream = new FileStream(zipFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
-            {
-                await response.Content.CopyToAsync(fileStream, cancellationToken);
-            }
+                await zipStream.CopyToAsync(fileStream, cancellationToken);
+
+            _logger.LogInformation(
+                "Launcher downloaded successfully: {VersionNumber}",
+                versionNumber
+            );
 
             // Extract the zip file
             FastZip fastZip = new();

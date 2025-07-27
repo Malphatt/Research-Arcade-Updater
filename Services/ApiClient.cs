@@ -1,22 +1,31 @@
 ﻿using Microsoft.Extensions.Logging;
 using Research_Arcade_Updater.Models;
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Research_Arcade_Updater.Services
 {
     public interface IApiClient
     {
-        Task<LauncherInfo> GetLauncherInfoAsync(ILogger<UpdaterService> _logger);
-        Task<bool> UpdateRemoteLauncherVersionAsync(string newVersion, ILogger<UpdaterService> _logger);
+        Task<string> GetLatestLauncherVersionAsync(ILogger<UpdaterService> _logger);
+        Task<Stream> GetLauncherDownloadAsync(
+            string versionNumber,
+            CancellationToken cancellationToken
+        );
+        Task<bool> UpdateRemoteLauncherVersionAsync(
+            string newVersion,
+            ILogger<UpdaterService> _logger
+        );
     }
     public class ApiClient(HttpClient http) : IApiClient
     {
         private readonly HttpClient _http = http;
 
-        public async Task<LauncherInfo> GetLauncherInfoAsync(ILogger<UpdaterService> _logger)
+        public async Task<string> GetLatestLauncherVersionAsync(ILogger<UpdaterService> _logger)
         {
             var response = await _http.GetAsync("/api/LauncherVersions/Latest");
 
@@ -34,15 +43,26 @@ namespace Research_Arcade_Updater.Services
             }
             response.EnsureSuccessStatusCode();
 
-            await using var stream = await response.Content.ReadAsStreamAsync();
+            return await response.Content.ReadAsStringAsync();
+        }
 
-            var options = new JsonSerializerOptions
+        public async Task<Stream> GetLauncherDownloadAsync(
+            string versionNumber,
+            CancellationToken cancellationToken
+        )
+        {
+            var response = await _http.GetAsync(
+                $"/api/LauncherVersions/Download?versionNumber={versionNumber}",
+                cancellationToken
+            );
+
+            if (!response.IsSuccessStatusCode)
             {
-                PropertyNameCaseInsensitive = true
-            };
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new Exception($"Failed to download launcher: {response.StatusCode} - {error}");
+            }
 
-            var updaterInfo = await JsonSerializer.DeserializeAsync<LauncherInfo>(stream, options);
-            return updaterInfo ?? throw new InvalidOperationException("Failed to deserialize LauncherInfo.");
+            return await response.Content.ReadAsStreamAsync(cancellationToken);
         }
 
         public async Task<bool> UpdateRemoteLauncherVersionAsync(string newVersion, ILogger<UpdaterService> _logger)
@@ -52,7 +72,7 @@ namespace Research_Arcade_Updater.Services
                 System.Text.Encoding.UTF8,
                 "application/json"
             );
-            var response = await _http.PutAsync("/api/MachineLauncherAssignments/UpdateVersion", content);
+            var response = await _http.PutAsync("/api/LauncherVersions/UpdateVersion", content);
 
             if (!response.IsSuccessStatusCode)
             {
