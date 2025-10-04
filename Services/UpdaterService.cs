@@ -12,6 +12,7 @@ namespace Research_Arcade_Updater.Services
     public interface IUpdaterService
     {
         event EventHandler<LauncherStateChangedEventArgs> StateChanged;
+        event EventHandler OnLauncherRestartRequired;
 
         Task CheckAndUpdateAsync(CancellationToken cancellationToken);
         Task ResetRemoteMachineLauncherVersionAsync(CancellationToken cancellationToken);
@@ -27,6 +28,10 @@ namespace Research_Arcade_Updater.Services
         public event EventHandler<LauncherStateChangedEventArgs> StateChanged;
         protected void OnStateChanged(UpdaterState s) =>
             StateChanged?.Invoke(this, new LauncherStateChangedEventArgs(s));
+
+        public event EventHandler OnLauncherRestartRequired;
+        protected void LauncherRestartRequired() =>
+            OnLauncherRestartRequired?.Invoke(this, EventArgs.Empty);
 
         private readonly IApiClient _apiClient;
         private readonly ILogger<UpdaterService> _logger;
@@ -74,8 +79,6 @@ namespace Research_Arcade_Updater.Services
             {
                 Version latestVersion = new(await _apiClient.GetLatestLauncherVersionAsync(_logger));
 
-                OnStateChanged(UpdaterState.updatingLauncher);
-
                 await DownloadLauncherAndExtractAsync(latestVersion, cancellationToken);
 
                 try
@@ -101,6 +104,7 @@ namespace Research_Arcade_Updater.Services
         private async Task DownloadLauncherAndExtractAsync(Version versionNumber, CancellationToken cancellationToken)
         {
             OnStateChanged(UpdaterState.updatingLauncher);
+            LauncherRestartRequired();
 
             _logger.LogInformation(
                 "Downloading launcher version: {VersionNumber}",

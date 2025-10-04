@@ -134,6 +134,7 @@ namespace Research_Arcade_Updater
 
             _updater = _host.Services.GetRequiredService<IUpdaterService>();
             _updater.StateChanged += Updater_StateChanged;
+            _updater.OnLauncherRestartRequired += RestartLauncher;
 
             // Find the Launcher process and close it
             Process[] processes = Process.GetProcessesByName("Research-Arcade-Launcher");
@@ -185,7 +186,7 @@ namespace Research_Arcade_Updater
         }
 
         private void Updater_StateChanged(object sender, LauncherStateChangedEventArgs e) => Dispatcher.Invoke(() => State = e.NewState);
-
+        private void RestartLauncher(object sender, EventArgs e) => CloseLauncher();
         private async void Window_Closing(object sender, CancelEventArgs e)
         {
             // Close the launcher
